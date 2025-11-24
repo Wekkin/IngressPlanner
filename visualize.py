@@ -8,6 +8,61 @@ import matplotlib.pyplot as plt
 import numpy as np
 from planner import IngressPlanner, Solution, Link
 from typing import Optional
+import matplotlib
+import matplotlib.font_manager as fm
+import platform
+
+# 配置中文字体支持
+def setup_chinese_font():
+    """配置中文字体"""
+    system = platform.system()
+    
+    # 常见的中文字体列表（按优先级排序）
+    chinese_fonts = [
+        'SimHei',           # Windows 黑体
+        'Microsoft YaHei',   # Windows 微软雅黑
+        'SimSun',            # Windows 宋体
+        'WenQuanYi Micro Hei',  # Linux 文泉驿微米黑
+        'WenQuanYi Zen Hei',    # Linux 文泉驿正黑
+        'Noto Sans CJK SC',     # Noto Sans 简体中文
+        'Noto Sans CJK TC',     # Noto Sans 繁体中文
+        'Noto Sans CJK JP',     # Noto Sans 日文（也支持中文）
+        'Droid Sans Fallback',  # Android 字体
+        'AR PL UMing CN',       # Linux 文鼎字体
+        'AR PL UKai CN',        # Linux 文鼎字体
+    ]
+    
+    # 获取系统所有可用字体
+    available_fonts = [f.name for f in fm.fontManager.ttflist]
+    
+    # 查找第一个可用的中文字体
+    selected_font = None
+    for font in chinese_fonts:
+        if font in available_fonts:
+            selected_font = font
+            break
+    
+    # 如果没找到，尝试查找包含中文关键词的字体
+    if not selected_font:
+        for font_name in available_fonts:
+            font_lower = font_name.lower()
+            if any(keyword in font_lower for keyword in ['noto', 'droid', 'wenquanyi', 'sim', 'microsoft']):
+                selected_font = font_name
+                break
+    
+    if selected_font:
+        plt.rcParams['font.sans-serif'] = [selected_font] + plt.rcParams['font.sans-serif']
+        print(f'使用中文字体: {selected_font}')
+    else:
+        print('警告: 未找到中文字体，中文可能显示为方框')
+        # 使用默认字体，但至少禁用负号显示问题
+        plt.rcParams['axes.unicode_minus'] = False
+    
+    # 禁用负号显示问题
+    plt.rcParams['axes.unicode_minus'] = False
+
+# 初始化中文字体
+setup_chinese_font()
 
 
 def visualize_solution(planner: IngressPlanner, solution: Solution, 

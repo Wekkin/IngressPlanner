@@ -23,11 +23,38 @@ HTML_TEMPLATE = """
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Ingress Portal选择器</title>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- 使用多个CDN作为备用 -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" 
+          onerror="this.onerror=null; this.href='https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css';" />
     <style>
         body { margin: 0; padding: 0; font-family: Arial, sans-serif; }
-        #map { height: 100vh; width: 100%; }
+        #map { height: 100vh; width: 100%; position: relative; }
+        #map-loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 10000;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+            text-align: center;
+        }
+        #map-error {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 10000;
+            background: #ffebee;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+            text-align: center;
+            color: #c62828;
+            max-width: 500px;
+        }
         #sidebar {
             position: fixed;
             top: 10px;
@@ -85,7 +112,9 @@ HTML_TEMPLATE = """
     </style>
 </head>
 <body>
-    <div id="map"></div>
+    <div id="map">
+        <div id="map-loading">正在加载地图...</div>
+    </div>
     <div id="sidebar">
         <h3>📍 Portal选择器</h3>
         
@@ -111,49 +140,209 @@ HTML_TEMPLATE = """
         <div id="portal-list"></div>
     </div>
 
+    <!-- 在body底部加载Leaflet，确保DOM已准备好 -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+            onerror="this.onerror=null; this.src='https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js';"></script>
+    
     <script>
-        var map = L.map('map').setView([40.008, 116.327], 15);
+        var map = null;
         var portals = [];
         var clickMode = false;
         var markers = [];
+        var initAttempts = 0;
+        var maxAttempts = 100; // 最多尝试10秒 (100 * 100ms)
         
-        // 添加地图图层
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '© OpenStreetMap contributors'
-        }).addTo(map);
-        
-        // Google卫星图
-        var googleSat = L.tileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
-            attribution: '© Google',
-            maxZoom: 20
-        });
-        
-        // 图层控制
-        var baseMaps = {
-            "OpenStreetMap": L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-                attribution: '© OpenStreetMap contributors'
-            }),
-            "Google卫星图": googleSat
-        };
-        L.control.layers(baseMaps).addTo(map);
-        
-        // 地图点击事件
-        map.on('click', function(e) {
-            if (clickMode) {
-                var name = document.getElementById('portal-name').value || 
-                          'Portal' + (portals.length + 1);
-                addPortal(name, e.latlng.lat, e.latlng.lng);
-                document.getElementById('portal-name').value = '';
-                clickMode = false;
+        // 等待DOM和Leaflet加载完成
+        function initMap() {
+            initAttempts++;
+            
+            // 检查Leaflet是否加载
+            if (typeof L === 'undefined') {
+                if (initAttempts >= maxAttempts) {
+                    showMapError('Leaflet地图库加载超时<br>请检查网络连接或刷新页面');
+                    return;
+                }
+                // 更新加载提示
+                var loadingDiv = document.getElementById('map-loading');
+                if (loadingDiv) {
+                    loadingDiv.innerHTML = '正在加载地图库... (' + initAttempts + '/' + maxAttempts + ')';
+                }
+                setTimeout(initMap, 100);
+                return;
             }
-        });
+            
+            try {
+                // 隐藏加载提示
+                var loadingDiv = document.getElementById('map-loading');
+                if (loadingDiv) {
+                    loadingDiv.style.display = 'none';
+                }
+                
+                // 初始化地图
+                map = L.map('map').setView([40.008, 116.327], 15);
+                
+                // 创建多个地图图层作为备用
+                // 方案1: OpenStreetMap
+                var osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    attribution: '© OpenStreetMap contributors',
+                    maxZoom: 19
+                });
+                
+                // 方案2: OpenStreetMap 备用服务器
+                var osmAltLayer = L.tileLayer('https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png', {
+                    attribution: '© OpenStreetMap contributors',
+                    maxZoom: 19
+                });
+                
+                // 方案3: 高德地图（国内可用）
+                var gaodeLayer = L.tileLayer('https://webrd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}', {
+                    subdomains: ['1', '2', '3', '4'],
+                    attribution: '© 高德地图',
+                    maxZoom: 18
+                });
+                
+                // 方案4: Google卫星图
+                var googleSat = L.tileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
+                    attribution: '© Google',
+                    maxZoom: 20
+                });
+                
+                // 尝试添加默认图层，如果失败则尝试备用图层
+                // 优先使用OpenStreetMap，因为它更可靠
+                var defaultLayer = osmLayer;
+                var layerAdded = false;
+                var tileErrorCount = 0;
+                
+                defaultLayer.addTo(map);
+                
+                // 监听地图加载事件
+                map.on('load', function() {
+                    console.log('地图加载完成');
+                    var loadingDiv = document.getElementById('map-loading');
+                    if (loadingDiv) {
+                        loadingDiv.style.display = 'none';
+                    }
+                });
+                
+                // 监听瓦片错误
+                defaultLayer.on('tileerror', function(error, tile) {
+                    tileErrorCount++;
+                    console.warn('瓦片加载错误:', tileErrorCount);
+                    
+                    // 如果错误太多，切换到备用图层
+                    if (tileErrorCount > 5 && !layerAdded) {
+                        layerAdded = true;
+                        map.removeLayer(defaultLayer);
+                        // 尝试高德地图
+                        gaodeLayer.addTo(map);
+                        console.log('切换到高德地图图层');
+                        
+                        // 如果高德地图也失败，再试备用OSM
+                        gaodeLayer.on('tileerror', function() {
+                            if (layerAdded) {
+                                map.removeLayer(gaodeLayer);
+                                osmAltLayer.addTo(map);
+                                console.log('切换到OpenStreetMap备用图层');
+                            }
+                        });
+                    }
+                });
+                
+                // 设置超时，如果5秒后还没加载成功，显示提示
+                setTimeout(function() {
+                    var loadingDiv = document.getElementById('map-loading');
+                    if (loadingDiv && loadingDiv.style.display !== 'none') {
+                        loadingDiv.innerHTML = '地图加载较慢，请稍候...<br>如果长时间无响应，请检查网络连接';
+                    }
+                }, 5000);
+                
+                // 图层控制
+                var baseMaps = {
+                    "高德地图": gaodeLayer,
+                    "OpenStreetMap": osmLayer,
+                    "OpenStreetMap (备用)": osmAltLayer,
+                    "Google卫星图": googleSat
+                };
+                L.control.layers(baseMaps).addTo(map);
+                
+                // 地图点击事件
+                map.on('click', function(e) {
+                    if (clickMode) {
+                        var name = document.getElementById('portal-name').value || 
+                                  'Portal' + (portals.length + 1);
+                        addPortal(name, e.latlng.lat, e.latlng.lng);
+                        document.getElementById('portal-name').value = '';
+                        clickMode = false;
+                    }
+                });
+                
+                console.log('地图初始化成功');
+                
+                // 确保加载提示被隐藏
+                setTimeout(function() {
+                    var loadingDiv = document.getElementById('map-loading');
+                    if (loadingDiv) {
+                        loadingDiv.style.display = 'none';
+                    }
+                }, 1000);
+                
+            } catch (error) {
+                console.error('地图初始化失败:', error);
+                showMapError('地图初始化失败: ' + error.message + '<br>请刷新页面重试<br><br>错误详情: ' + error.stack);
+            }
+        }
+        
+        // 显示错误信息
+        function showMapError(message) {
+            var loadingDiv = document.getElementById('map-loading');
+            if (loadingDiv) {
+                loadingDiv.style.display = 'none';
+            }
+            
+            var errorDiv = document.getElementById('map-error');
+            if (!errorDiv) {
+                errorDiv = document.createElement('div');
+                errorDiv.id = 'map-error';
+                document.getElementById('map').appendChild(errorDiv);
+            }
+            errorDiv.innerHTML = '<h3>地图加载失败</h3><p>' + message + '</p><button onclick="location.reload()" style="padding: 10px 20px; margin-top: 10px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer;">刷新页面</button>';
+        }
+        
+        // 页面加载完成后初始化
+        function startInit() {
+            console.log('开始初始化地图...');
+            console.log('Leaflet状态:', typeof L !== 'undefined' ? '已加载' : '未加载');
+            
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', initMap);
+            } else {
+                // 延迟一点确保所有资源都加载了
+                setTimeout(initMap, 200);
+            }
+        }
+        
+        // 如果脚本在head中，等待window.onload
+        if (document.readyState === 'loading') {
+            window.addEventListener('load', startInit);
+        } else {
+            startInit();
+        }
         
         function enableClickMode() {
+            if (!map) {
+                alert('地图尚未加载完成，请稍候再试');
+                return;
+            }
             clickMode = true;
             alert('点击地图添加Portal');
         }
         
         function addPortal(name, lat, lon) {
+            if (!map) {
+                alert('地图尚未加载完成，请稍候再试');
+                return;
+            }
+            
             var portal = {name: name, lat: lat, lon: lon};
             portals.push(portal);
             
@@ -177,6 +366,8 @@ HTML_TEMPLATE = """
         }
         
         function removePortal(index) {
+            if (!map) return;
+            
             portals.splice(index, 1);
             if (markers[index]) {
                 map.removeLayer(markers[index]);
@@ -263,6 +454,11 @@ HTML_TEMPLATE = """
         }
         
         function clearAll() {
+            if (!map) {
+                alert('地图尚未加载完成');
+                return;
+            }
+            
             if (confirm('确定要清空所有Portal吗？')) {
                 portals = [];
                 markers.forEach(function(marker) {

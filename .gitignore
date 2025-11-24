@@ -24,6 +24,7 @@ wheels/
 venv/
 ENV/
 env/
+ingress/
 
 # IDE
 .vscode/
@@ -37,6 +38,10 @@ solution_*.txt
 output_*.txt
 result*.png
 result*.jpg
+test_*.png
+*_test.png
+*_fixed.png
+*_final.png
 # 保留示例portal文件
 !example_portals.txt
 !portals_*.txt
